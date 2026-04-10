@@ -12,7 +12,7 @@ class SaveProviderConfigUseCase(
     private val secretStore: SecretStore,
 ) {
     suspend operator fun invoke(draft: ProviderConfigDraft): HostResult<Unit> {
-        if (draft.providerId.isBlank() || draft.baseUrl.isBlank() || draft.modelName.isBlank()) {
+        if (!draft.hasRequiredFields) {
             return HostResult.Failure(
                 HostError(
                     category = HostErrorCategory.Validation,
@@ -22,15 +22,28 @@ class SaveProviderConfigUseCase(
             )
         }
 
-        val secretResult = when {
-            draft.apiKey.isNotBlank() -> secretStore.saveApiKey(draft.apiKey)
-            draft.hasStoredApiKey -> HostResult.Success(Unit)
-            else -> secretStore.clearApiKey()
-        }
-        if (secretResult is HostResult.Failure) {
-            return secretResult
+        val persistedHasApiKey = when {
+            draft.apiKey.isNotBlank() -> {
+                val secretResult = secretStore.saveApiKey(draft.apiKey)
+                if (secretResult is HostResult.Failure) {
+                    return secretResult
+                }
+                true
+            }
+
+            draft.hasStoredApiKey -> secretStore.hasApiKey()
+
+            else -> {
+                val secretResult = secretStore.clearApiKey()
+                if (secretResult is HostResult.Failure) {
+                    return secretResult
+                }
+                false
+            }
         }
 
-        return providerConfigStore.saveDraft(draft.withoutSecret())
+        return providerConfigStore.saveDraft(
+            draft.withoutSecret(hasStoredApiKey = persistedHasApiKey)
+        )
     }
 }

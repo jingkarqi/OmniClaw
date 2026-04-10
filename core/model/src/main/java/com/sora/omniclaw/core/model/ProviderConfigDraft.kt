@@ -11,14 +11,19 @@ data class ProviderConfigDraft(
     @Transient val apiKey: String = "",
     val hasStoredApiKey: Boolean = false,
 ) {
-    val isReady: Boolean
+    val hasRequiredFields: Boolean
         get() = providerId.isNotBlank() &&
             baseUrl.isNotBlank() &&
-            modelName.isNotBlank() &&
-            (apiKey.isNotBlank() || hasStoredApiKey)
+            modelName.isNotBlank()
 
-    fun withoutSecret(): ProviderConfigDraft = copy(
+    val isReady: Boolean
+        get() = isConfigured(hasStoredApiKey)
+
+    fun isConfigured(hasAvailableSecret: Boolean): Boolean = hasRequiredFields &&
+        (apiKey.isNotBlank() || hasAvailableSecret)
+
+    fun withoutSecret(hasStoredApiKey: Boolean = this.hasStoredApiKey || apiKey.isNotBlank()): ProviderConfigDraft = copy(
         apiKey = "",
-        hasStoredApiKey = hasStoredApiKey || apiKey.isNotBlank(),
+        hasStoredApiKey = hasStoredApiKey,
     )
 }

@@ -2,6 +2,7 @@ package com.sora.omniclaw.testing.fake
 
 import com.sora.omniclaw.core.common.HostResult
 import com.sora.omniclaw.core.model.DiagnosticsSummary
+import com.sora.omniclaw.core.model.HostLifecycleState
 import com.sora.omniclaw.core.model.RuntimeStatus
 import com.sora.omniclaw.runtime.api.RuntimeManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,9 +22,37 @@ class FakeRuntimeManager(
     var nextStartResult: HostResult<Unit> = HostResult.Success(Unit)
     var nextStopResult: HostResult<Unit> = HostResult.Success(Unit)
 
-    override suspend fun start(): HostResult<Unit> = nextStartResult
+    override suspend fun start(): HostResult<Unit> {
+        return nextStartResult.also { result ->
+            _status.value = when (result) {
+                is HostResult.Success -> _status.value.copy(
+                    lifecycleState = HostLifecycleState.Running,
+                    lastErrorMessage = null,
+                )
 
-    override suspend fun stop(): HostResult<Unit> = nextStopResult
+                is HostResult.Failure -> _status.value.copy(
+                    lifecycleState = HostLifecycleState.Error,
+                    lastErrorMessage = result.error.message,
+                )
+            }
+        }
+    }
+
+    override suspend fun stop(): HostResult<Unit> {
+        return nextStopResult.also { result ->
+            _status.value = when (result) {
+                is HostResult.Success -> _status.value.copy(
+                    lifecycleState = HostLifecycleState.Stopped,
+                    lastErrorMessage = null,
+                )
+
+                is HostResult.Failure -> _status.value.copy(
+                    lifecycleState = HostLifecycleState.Error,
+                    lastErrorMessage = result.error.message,
+                )
+            }
+        }
+    }
 
     fun updateStatus(status: RuntimeStatus) {
         _status.value = status

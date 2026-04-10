@@ -1,6 +1,7 @@
 package com.sora.omniclaw.core.storage
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -12,6 +13,13 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class AndroidSecretStore(
     context: Context,
@@ -48,24 +56,33 @@ class AndroidSecretStore(
         )
     }
 
-    override suspend fun readApiKey(): String? {
-        val encryptedValue = sharedPreferences.getString(EncryptedValueKey, null) ?: return null
-        val ivValue = sharedPreferences.getString(InitializationVectorKey, null) ?: return null
+    override suspend fun readApiKey(): String? = readStoredApiKey()
 
-        return runCatching {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                getOrCreateSecretKey(),
-                GCMParameterSpec(GCM_TAG_LENGTH_BITS, Base64.decode(ivValue, Base64.NO_WRAP))
-            )
+    override suspend fun hasApiKey(): Boolean = isApiKeyAvailable()
 
-            val decryptedBytes = cipher.doFinal(Base64.decode(encryptedValue, Base64.NO_WRAP))
-            decryptedBytes.toString(Charsets.UTF_8)
-        }.getOrNull()
+    override fun observeApiKeyAvailability(): Flow<Boolean> {
+        return callbackFlow {
+            val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == null || key == EncryptedValueKey || key == InitializationVectorKey) {
+                    trySend(isApiKeyAvailable())
+                }
+            }
+
+            sharedPreferences.registerOnSharedPreferenceChangeListener(listener)
+            trySend(isApiKeyAvailable())
+            val pollingJob = launch {
+                while (isActive) {
+                    delay(ApiKeyAvailabilityPollMillis)
+                    trySend(isApiKeyAvailable())
+                }
+            }
+
+            awaitClose {
+                pollingJob.cancel()
+                sharedPreferences.unregisterOnSharedPreferenceChangeListener(listener)
+            }
+        }.distinctUntilChanged()
     }
-
-    override suspend fun hasApiKey(): Boolean = !readApiKey().isNullOrBlank()
 
     override suspend fun clearApiKey(): HostResult<Unit> {
         return runCatching {
@@ -86,6 +103,25 @@ class AndroidSecretStore(
             }
         )
     }
+
+    private fun readStoredApiKey(): String? {
+        val encryptedValue = sharedPreferences.getString(EncryptedValueKey, null) ?: return null
+        val ivValue = sharedPreferences.getString(InitializationVectorKey, null) ?: return null
+
+        return runCatching {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                getOrCreateSecretKey(),
+                GCMParameterSpec(GCM_TAG_LENGTH_BITS, Base64.decode(ivValue, Base64.NO_WRAP))
+            )
+
+            val decryptedBytes = cipher.doFinal(Base64.decode(encryptedValue, Base64.NO_WRAP))
+            decryptedBytes.toString(Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    private fun isApiKeyAvailable(): Boolean = !readStoredApiKey().isNullOrBlank()
 
     private fun getOrCreateSecretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
@@ -118,5 +154,6 @@ class AndroidSecretStore(
         const val InitializationVectorKey = "provider_api_key_iv"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val GCM_TAG_LENGTH_BITS = 128
+        const val ApiKeyAvailabilityPollMillis = 1000L
     }
 }

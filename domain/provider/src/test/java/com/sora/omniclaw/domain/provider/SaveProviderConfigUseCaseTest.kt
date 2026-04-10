@@ -34,6 +34,28 @@ class SaveProviderConfigUseCaseTest {
         assertEquals("", configStore.savedDraft?.apiKey)
         assertEquals(true, configStore.savedDraft?.hasStoredApiKey)
     }
+
+    @Test
+    fun `persists missing stored api key when metadata says key exists but secret store is empty`() = runBlocking {
+        val configStore = FakeProviderConfigStore()
+        val secretStore = FakeSecretStore(savedApiKey = null)
+        val useCase = SaveProviderConfigUseCase(
+            providerConfigStore = configStore,
+            secretStore = secretStore,
+        )
+        val draft = ProviderConfigDraft(
+            providerId = "openai-compatible",
+            baseUrl = "https://api.example.com",
+            modelName = "gpt-test",
+            apiKey = "",
+            hasStoredApiKey = true,
+        )
+
+        val result = useCase(draft)
+
+        assertTrue(result is HostResult.Success<*>)
+        assertEquals(false, configStore.savedDraft?.hasStoredApiKey)
+    }
 }
 
 private class FakeProviderConfigStore : ProviderConfigStore {
@@ -51,9 +73,18 @@ private class FakeProviderConfigStore : ProviderConfigStore {
 
 private class FakeSecretStore : SecretStore {
     var savedApiKey: String? = null
+    private val apiKeyAvailability = MutableStateFlow(false)
+
+    constructor()
+
+    constructor(savedApiKey: String?) {
+        this.savedApiKey = savedApiKey
+        apiKeyAvailability.value = !savedApiKey.isNullOrBlank()
+    }
 
     override suspend fun saveApiKey(apiKey: String): HostResult<Unit> {
         savedApiKey = apiKey
+        apiKeyAvailability.value = apiKey.isNotBlank()
         return HostResult.Success(Unit)
     }
 
@@ -61,8 +92,11 @@ private class FakeSecretStore : SecretStore {
 
     override suspend fun hasApiKey(): Boolean = !savedApiKey.isNullOrBlank()
 
+    override fun observeApiKeyAvailability(): Flow<Boolean> = apiKeyAvailability
+
     override suspend fun clearApiKey(): HostResult<Unit> {
         savedApiKey = null
+        apiKeyAvailability.value = false
         return HostResult.Success(Unit)
     }
 }

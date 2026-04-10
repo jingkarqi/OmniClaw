@@ -5,8 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import com.sora.omniclaw.core.model.ProviderConfigDraft
@@ -56,5 +59,48 @@ class ProviderScreenTest {
             assertEquals(1, saved)
             assertEquals("https://example.com/v1", lastBaseUrl)
         }
+    }
+
+    @Test
+    fun providerScreen_reflects_real_stored_secret_availability() {
+        composeRule.setContent {
+            ProviderScreen(
+                draft = ProviderConfigDraft(
+                    providerId = "OpenAI",
+                    baseUrl = "https://api.openai.com/v1",
+                    modelName = "gpt-4o-mini",
+                    apiKey = "",
+                    hasStoredApiKey = true,
+                ),
+                onDraftChange = {},
+                onSave = {},
+                onReset = {}
+            )
+        }
+
+        composeRule.onNodeWithText(
+            "A provider key is already stored. Enter a new key to replace it."
+        ).assertIsDisplayed()
+        composeRule.onNodeWithTag(ProviderScreenTags.SaveButton).assertIsEnabled()
+    }
+
+    @Test
+    fun providerScreen_disables_save_when_no_inline_or_stored_secret_exists() {
+        composeRule.setContent {
+            ProviderScreen(
+                draft = ProviderConfigDraft(
+                    providerId = "OpenAI",
+                    baseUrl = "https://api.openai.com/v1",
+                    modelName = "gpt-4o-mini",
+                    apiKey = "",
+                    hasStoredApiKey = false,
+                ),
+                onDraftChange = {},
+                onSave = {},
+                onReset = {}
+            )
+        }
+
+        composeRule.onNodeWithTag(ProviderScreenTags.SaveButton).assertIsNotEnabled()
     }
 }
