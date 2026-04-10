@@ -7,18 +7,29 @@ import com.sora.omniclaw.core.common.HostResult
 import com.sora.omniclaw.core.model.BundledPayloadManifest
 import com.sora.omniclaw.runtime.api.PayloadLocator
 import java.io.FileNotFoundException
+import java.io.InputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.SerializationException
 
 class AssetPayloadLocator(
-    private val context: Context,
+    private val manifestStreamOpener: () -> InputStream,
     private val json: Json = Json {
         ignoreUnknownKeys = true
     },
 ) : PayloadLocator {
+    constructor(
+        context: Context,
+        json: Json = Json {
+            ignoreUnknownKeys = true
+        },
+    ) : this(
+        manifestStreamOpener = { context.assets.open(MANIFEST_PATH) },
+        json = json,
+    )
+
     override suspend fun loadBundledPayloadManifest(): HostResult<BundledPayloadManifest?> {
         return runCatching {
-            context.assets.open(MANIFEST_PATH).bufferedReader().use { reader ->
+            manifestStreamOpener().bufferedReader().use { reader ->
                 json.decodeFromString<BundledPayloadManifest>(reader.readText())
             }
         }.fold(
