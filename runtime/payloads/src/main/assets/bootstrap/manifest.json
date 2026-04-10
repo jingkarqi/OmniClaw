@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "payloads": [
+    {
+      "fileName": "debian-rootfs.tar.xz",
+      "sha256": "2ebdb8d003dd8f830b465071e2f9ed6c8988a1cef15f3588ae00083bedbdff3b",
+      "sizeBytes": 224
+    },
+    {
+      "fileName": "openclaw-2026.3.13.tgz",
+      "sha256": "e22cb5f12ab4efff7ac06f5ee814df9b9f90877404101afa5b013f935495c6eb",
+      "sizeBytes": 182
+    }
+  ]
+}

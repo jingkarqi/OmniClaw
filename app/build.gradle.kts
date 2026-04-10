@@ -40,9 +40,27 @@ android {
 }
 
 dependencies {
+    implementation(project(":bridge:api"))
+    implementation(project(":bridge:impl"))
+    implementation(project(":core:common"))
+    implementation(project(":core:model"))
+    implementation(project(":core:storage"))
+    implementation(project(":domain:bridge"))
+    implementation(project(":domain:provider"))
+    implementation(project(":domain:runtime"))
+    implementation(project(":feature:home"))
+    implementation(project(":feature:permissions"))
+    implementation(project(":feature:provider"))
+    implementation(project(":feature:runtime"))
+    implementation(project(":runtime:api"))
+    implementation(project(":runtime:impl"))
+    implementation(project(":runtime:payloads"))
+    implementation(project(":service:host"))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.navigation.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
