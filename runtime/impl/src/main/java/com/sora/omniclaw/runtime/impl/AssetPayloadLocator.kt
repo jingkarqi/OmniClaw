@@ -11,12 +11,13 @@ import java.io.InputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.SerializationException
 
-class AssetPayloadLocator(
+class AssetPayloadLocator private constructor(
     private val manifestStreamOpener: () -> InputStream,
+    private val assetStreamOpener: (String) -> InputStream,
     private val json: Json = Json {
         ignoreUnknownKeys = true
     },
-) : PayloadLocator {
+) : PayloadLocator, BundledPayloadSource {
     constructor(
         context: Context,
         json: Json = Json {
@@ -24,6 +25,7 @@ class AssetPayloadLocator(
         },
     ) : this(
         manifestStreamOpener = { context.assets.open(MANIFEST_PATH) },
+        assetStreamOpener = { fileName: String -> context.assets.open("$ASSET_DIRECTORY/$fileName") },
         json = json,
     )
 
@@ -56,7 +58,51 @@ class AssetPayloadLocator(
         )
     }
 
-    private companion object {
+    override fun openBundledPayload(fileName: String): HostResult<InputStream> {
+        return runCatching {
+            assetStreamOpener(fileName)
+        }.fold(
+            onSuccess = { HostResult.Success(it) },
+            onFailure = { throwable ->
+                when (throwable) {
+                    is FileNotFoundException -> HostResult.Failure(
+                        HostError(
+                            category = HostErrorCategory.Runtime,
+                            message = "Bundled payload '$fileName' is missing at assets/bootstrap/$fileName.",
+                            recoverable = true,
+                        )
+                    )
+
+                    else -> HostResult.Failure(
+                        HostError(
+                            category = HostErrorCategory.Runtime,
+                            message = "Failed to open bundled payload '$fileName' at assets/bootstrap/$fileName.",
+                            recoverable = true,
+                        )
+                    )
+                }
+            }
+        )
+    }
+
+    companion object {
+        const val ASSET_DIRECTORY = "bootstrap"
+        const val MANIFEST_FILE_NAME = "manifest.json"
         const val MANIFEST_PATH = "bootstrap/manifest.json"
+        internal fun forTesting(
+            manifestStreamOpener: () -> InputStream,
+            assetStreamOpener: (String) -> InputStream = { fileName ->
+                throw FileNotFoundException("Missing bundled payload: $fileName")
+            },
+            json: Json = Json {
+                ignoreUnknownKeys = true
+            },
+        ): AssetPayloadLocator {
+            return AssetPayloadLocator(
+                manifestStreamOpener = manifestStreamOpener,
+                assetStreamOpener = assetStreamOpener,
+                json = json,
+            )
+        }
     }
 }

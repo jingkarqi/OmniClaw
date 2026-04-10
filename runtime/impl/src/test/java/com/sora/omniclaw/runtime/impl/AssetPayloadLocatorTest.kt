@@ -11,7 +11,7 @@ import org.junit.Test
 class AssetPayloadLocatorTest {
     @Test
     fun `loadBundledPayloadManifest returns failure when manifest is malformed`() = runBlocking {
-        val locator = AssetPayloadLocator(
+        val locator = AssetPayloadLocator.forTesting(
             manifestStreamOpener = {
                 ByteArrayInputStream("{ malformed".toByteArray(Charsets.UTF_8))
             }
@@ -28,7 +28,7 @@ class AssetPayloadLocatorTest {
 
     @Test
     fun `loadBundledPayloadManifest returns success null when manifest file is missing`() = runBlocking {
-        val locator = AssetPayloadLocator(
+        val locator = AssetPayloadLocator.forTesting(
             manifestStreamOpener = {
                 throw FileNotFoundException("missing manifest")
             }

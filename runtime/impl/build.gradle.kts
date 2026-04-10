@@ -26,8 +26,12 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:model"))
     implementation(project(":runtime:api"))
+    implementation(libs.apache.commons.compress)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.tukaani.xz)
 
+    testImplementation(libs.apache.commons.compress)
     testImplementation(libs.junit)
+    testImplementation(libs.tukaani.xz)
 }
