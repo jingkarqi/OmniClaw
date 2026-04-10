@@ -3,13 +3,13 @@
   "payloads": [
     {
       "fileName": "debian-rootfs.tar.xz",
-      "sha256": "2ebdb8d003dd8f830b465071e2f9ed6c8988a1cef15f3588ae00083bedbdff3b",
-      "sizeBytes": 224
+      "sha256": "8ccff3927c962e4c20fe7c2a78fefa52b76376eca346d719b0d6de6e927b8464",
+      "sizeBytes": 140729948
     },
     {
       "fileName": "openclaw-2026.3.13.tgz",
-      "sha256": "e22cb5f12ab4efff7ac06f5ee814df9b9f90877404101afa5b013f935495c6eb",
-      "sizeBytes": 182
+      "sha256": "7aec036d6cce77d5878c375ae8ebe9e5a28950ec4279f3848a5a0147c0289cf4",
+      "sizeBytes": 33535237
     }
   ]
 }
