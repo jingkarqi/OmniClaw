@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class StubRuntimeManager(
     private val payloadLocator: PayloadLocator,
+    private val payloadValidator: BootstrapPayloadValidator = BootstrapPayloadValidator(),
 ) : RuntimeManager {
     private val _status = MutableStateFlow(
         RuntimeStatus(
@@ -39,33 +40,32 @@ class StubRuntimeManager(
 
         return when (val manifestResult = payloadLocator.loadBundledPayloadManifest()) {
             is HostResult.Success -> {
-                val manifest = manifestResult.value
-                if (manifest == null || manifest.payloads.isEmpty()) {
-                    _status.value = RuntimeStatus(
-                        lifecycleState = HostLifecycleState.InstallRequired,
-                        payloadAvailable = false,
-                    )
-                    _diagnostics.value = DiagnosticsSummary(
-                        headline = "Install required",
-                        details = listOf("Bundled payload manifest was not found in assets/bootstrap/."),
-                    )
-                    HostResult.Failure(
-                        HostError(
-                            category = HostErrorCategory.Runtime,
-                            message = "Bundled payload manifest is missing.",
-                            recoverable = true,
+                when (val validationResult = payloadValidator.validate(manifestResult.value)) {
+                    is HostResult.Success -> {
+                        val manifest = validationResult.value
+                        _status.value = RuntimeStatus(
+                            lifecycleState = HostLifecycleState.Running,
+                            payloadAvailable = true,
                         )
-                    )
-                } else {
-                    _status.value = RuntimeStatus(
-                        lifecycleState = HostLifecycleState.Running,
-                        payloadAvailable = true,
-                    )
-                    _diagnostics.value = DiagnosticsSummary(
-                        headline = "Runtime running",
-                        details = listOf("Stub runtime started with ${manifest.payloads.size} bundled payload entries."),
-                    )
-                    HostResult.Success(Unit)
+                        _diagnostics.value = DiagnosticsSummary(
+                            headline = "Runtime running",
+                            details = listOf("Stub runtime started with ${manifest.payloads.size} bundled payload entries."),
+                        )
+                        HostResult.Success(Unit)
+                    }
+
+                    is HostResult.Failure -> {
+                        _status.value = RuntimeStatus(
+                            lifecycleState = HostLifecycleState.InstallRequired,
+                            payloadAvailable = false,
+                            lastErrorMessage = validationResult.error.message,
+                        )
+                        _diagnostics.value = DiagnosticsSummary(
+                            headline = "Install required",
+                            details = listOf(validationResult.error.message),
+                        )
+                        validationResult
+                    }
                 }
             }
 

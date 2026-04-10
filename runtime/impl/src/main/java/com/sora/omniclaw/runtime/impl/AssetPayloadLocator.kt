@@ -8,6 +8,7 @@ import com.sora.omniclaw.core.model.BundledPayloadManifest
 import com.sora.omniclaw.runtime.api.PayloadLocator
 import java.io.FileNotFoundException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
 
 class AssetPayloadLocator(
     private val context: Context,
@@ -25,10 +26,17 @@ class AssetPayloadLocator(
             onFailure = { throwable ->
                 when (throwable) {
                     is FileNotFoundException -> HostResult.Success(null)
+                    is SerializationException -> HostResult.Failure(
+                        HostError(
+                            category = HostErrorCategory.Runtime,
+                            message = "Bundled payload manifest is malformed at assets/bootstrap/manifest.json.",
+                            recoverable = true,
+                        )
+                    )
                     else -> HostResult.Failure(
                         HostError(
                             category = HostErrorCategory.Runtime,
-                            message = throwable.message ?: "Failed to read bundled payload manifest.",
+                            message = "Failed to read bundled payload manifest at assets/bootstrap/manifest.json.",
                             recoverable = true,
                         )
                     )
