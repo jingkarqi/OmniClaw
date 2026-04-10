@@ -1,0 +1,55 @@
+# Built artifacts
+bin/
+gen/
+out/
+build/
+app/build/
+
+# Gradle
+.gradle/
+build/
+*/build/
+local.properties
+.navigation/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetSelector.xml
+.idea/gradle.xml
+.idea/misc.xml
+.idea/runConfigurations.xml
+.idea/vcs.xml
+.idea/markdown.xml
+.idea/compiler.xml
+.idea/deviceManager.xml
+.idea/AndroidProjectSystem.xml
+
+# Log files
+*.log
+
+# Captures and profiling
+/captures/
+*.hprof
+.externalNativeBuild/
+.cxx/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*~
+*.swp
+
+# superpower
+docs/superpowers

@@ -1,0 +1,2 @@
+runtime/payloads/src/main/assets/bootstrap/debian-rootfs.tar.xz filter=lfs diff=lfs merge=lfs -text
+runtime/payloads/src/main/assets/bootstrap/openclaw-2026.3.13.tgz filter=lfs diff=lfs merge=lfs -text
