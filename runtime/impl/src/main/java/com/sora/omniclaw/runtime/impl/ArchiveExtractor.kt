@@ -4,7 +4,9 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermission
 import kotlin.io.path.absolute
@@ -59,9 +61,11 @@ internal class ArchiveExtractor {
         val outputPath = resolveEntryPath(root, entry.name)
 
         when {
-            entry.isDirectory -> Files.createDirectories(outputPath)
-            entry.isSymbolicLink -> createSymbolicLink(outputPath, entry)
-            else -> writeFile(outputPath, tar, entry.mode)
+            entry.isDirectory -> createDirectory(root, outputPath, entry.name)
+            entry.isSymbolicLink -> createSymbolicLink(root, outputPath, entry)
+            entry.isLink || entry.isCharacterDevice || entry.isBlockDevice || entry.isFIFO ->
+                throw IOException("Archive entry '${entry.name}' uses unsupported type.")
+            else -> writeFile(root, outputPath, tar, entry)
         }
     }
 
@@ -77,25 +81,71 @@ internal class ArchiveExtractor {
     }
 
     private fun createSymbolicLink(
+        root: Path,
         outputPath: Path,
         entry: TarArchiveEntry,
     ) {
         val linkTarget = entry.linkName ?: throw IOException("Archive symbolic link '${entry.name}' is missing a target.")
-        Files.createDirectories(outputPath.parent)
+        val parentPath = outputPath.parent ?: root
+        ensurePathDoesNotTraverseSymlink(root, parentPath, entry.name)
+        Files.createDirectories(parentPath)
         Files.deleteIfExists(outputPath)
         Files.createSymbolicLink(outputPath, Path.of(linkTarget))
     }
 
+    private fun createDirectory(
+        root: Path,
+        outputPath: Path,
+        entryName: String,
+    ) {
+        val parentPath = outputPath.parent ?: root
+        ensurePathDoesNotTraverseSymlink(root, parentPath, entryName)
+        ensurePathIsNotSymbolicLink(outputPath, entryName)
+        Files.createDirectories(outputPath)
+    }
+
     private fun writeFile(
+        root: Path,
         outputPath: Path,
         input: InputStream,
-        mode: Int,
+        entry: TarArchiveEntry,
     ) {
-        Files.createDirectories(outputPath.parent)
-        Files.newOutputStream(outputPath).use { output ->
+        val parentPath = outputPath.parent ?: root
+        ensurePathDoesNotTraverseSymlink(root, parentPath, entry.name)
+        ensurePathIsNotSymbolicLink(outputPath, entry.name)
+        Files.createDirectories(parentPath)
+        Files.newOutputStream(
+            outputPath,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            StandardOpenOption.WRITE,
+            LinkOption.NOFOLLOW_LINKS,
+        ).use { output ->
             input.copyTo(output)
         }
-        applyPosixPermissions(outputPath, mode)
+        applyPosixPermissions(outputPath, entry.mode)
+    }
+
+    private fun ensurePathDoesNotTraverseSymlink(
+        root: Path,
+        outputPath: Path,
+        entryName: String,
+    ) {
+        var currentPath = root
+        val relativePath = root.relativize(outputPath)
+        for (index in 0 until relativePath.nameCount) {
+            currentPath = currentPath.resolve(relativePath.getName(index))
+            ensurePathIsNotSymbolicLink(currentPath, entryName)
+        }
+    }
+
+    private fun ensurePathIsNotSymbolicLink(
+        path: Path,
+        entryName: String,
+    ) {
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(path)) {
+            throw IOException("Archive entry '$entryName' traverses symbolic link '$path'.")
+        }
     }
 
     private fun applyPosixPermissions(

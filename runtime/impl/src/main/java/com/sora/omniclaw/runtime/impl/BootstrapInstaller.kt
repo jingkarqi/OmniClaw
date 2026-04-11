@@ -3,9 +3,17 @@ package com.sora.omniclaw.runtime.impl
 import com.sora.omniclaw.core.common.HostError
 import com.sora.omniclaw.core.common.HostErrorCategory
 import com.sora.omniclaw.core.common.HostResult
+import com.sora.omniclaw.core.model.BundledPayloadEntry
 import com.sora.omniclaw.core.model.BundledPayloadManifest
 import java.io.File
 import java.io.IOException
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
 
 internal interface BundledPayloadSource {
     fun openBundledPayload(fileName: String): HostResult<java.io.InputStream>
@@ -20,18 +28,11 @@ internal class BootstrapInstaller(
     private val nowEpochMs: () -> Long = System::currentTimeMillis,
 ) {
     fun install(manifest: BundledPayloadManifest?): HostResult<RuntimeInstallState> {
-        val validatedManifest = when (val validationResult = payloadValidator.validate(manifest)) {
+        val validatedManifest = when (val validationResult = payloadValidator.validateInstallable(manifest)) {
             is HostResult.Success -> validationResult.value
             is HostResult.Failure -> return validationResult
         }
-        val runtimeVersion = extractRuntimeVersion(validatedManifest)
-            ?: return HostResult.Failure(
-                HostError(
-                    category = HostErrorCategory.Runtime,
-                    message = "Bundled runtime archive name does not encode a runtime version.",
-                    recoverable = true,
-                )
-            )
+        val runtimeVersion = validatedManifest.runtimeVersion
 
         when (val currentState = installStateStore.read()) {
             is HostResult.Success -> {
@@ -48,7 +49,7 @@ internal class BootstrapInstaller(
         return try {
             resetInstallWorkspace()
             stageAndExtractPayload(
-                fileName = ROOT_FS_FILE_NAME,
+                payloadEntry = validatedManifest.rootFsEntry,
                 runtimeVersion = runtimeVersion,
                 startedAtEpochMs = startedAtEpochMs,
                 updatedAtEpochMs = startedAtEpochMs,
@@ -64,7 +65,7 @@ internal class BootstrapInstaller(
             ensureExpectedRootFsLayout()
 
             stageAndExtractPayload(
-                fileName = RUNTIME_ARCHIVE_FILE_NAME,
+                payloadEntry = validatedManifest.runtimeArchiveEntry,
                 runtimeVersion = runtimeVersion,
                 startedAtEpochMs = startedAtEpochMs,
                 updatedAtEpochMs = nowEpochMs(),
@@ -87,6 +88,7 @@ internal class BootstrapInstaller(
             installFailure(
                 reason = when (throwable) {
                     is MissingBundledPayloadException -> throwable.message ?: "Bundled payload is missing."
+                    is InvalidBundledPayloadException -> throwable.message ?: "Bundled payload does not match the manifest."
                     is PayloadExtractionException -> "Failed to extract bundled payload '${throwable.fileName}'."
                     is InvalidExtractedLayoutException -> throwable.message ?: "Extracted runtime layout is invalid."
                     is IOException -> throwable.message ?: "Failed to extract bundled payload."
@@ -98,7 +100,7 @@ internal class BootstrapInstaller(
     }
 
     private fun stageAndExtractPayload(
-        fileName: String,
+        payloadEntry: BundledPayloadEntry,
         runtimeVersion: String,
         startedAtEpochMs: Long,
         updatedAtEpochMs: Long,
@@ -116,7 +118,7 @@ internal class BootstrapInstaller(
             is HostResult.Failure -> throw IOException(installingResult.error.message)
         }
 
-        val stagedFile = stagePayload(fileName)
+        val stagedFile = stagePayload(payloadEntry)
         stagedFile.inputStream().use { input ->
             try {
                 archiveExtractor.extract(
@@ -125,16 +127,16 @@ internal class BootstrapInstaller(
                     targetDir = extractionTarget,
                 )
             } catch (throwable: Throwable) {
-                throw PayloadExtractionException(fileName)
+                throw PayloadExtractionException(payloadEntry.fileName)
             }
         }
     }
 
-    private fun stagePayload(fileName: String): File {
-        val stagedFile = File(directories.payloadStagingDir, fileName)
+    private fun stagePayload(payloadEntry: BundledPayloadEntry): File {
+        val stagedFile = File(directories.payloadStagingDir, payloadEntry.fileName)
         ensureDirectory(directories.payloadStagingDir)
 
-        when (val openResult = payloadSource.openBundledPayload(fileName)) {
+        when (val openResult = payloadSource.openBundledPayload(payloadEntry.fileName)) {
             is HostResult.Success -> {
                 openResult.value.use { input ->
                     stagedFile.outputStream().use { output ->
@@ -146,21 +148,22 @@ internal class BootstrapInstaller(
             is HostResult.Failure -> throw MissingBundledPayloadException(openResult.error.message)
         }
 
+        verifyStagedPayload(stagedFile, payloadEntry)
         return stagedFile
     }
 
     private fun hasExpectedLayout(runtimeVersion: String): Boolean {
-        return rootFsMarker().isDirectory && runtimeRoot(runtimeVersion).isDirectory
+        return hasExpectedRootFsLayout() && hasExpectedRuntimeLayout(runtimeVersion)
     }
 
     private fun ensureExpectedRootFsLayout() {
-        if (!rootFsMarker().isDirectory) {
+        if (!hasExpectedRootFsLayout()) {
             throw InvalidExtractedLayoutException("Extracted Debian rootfs layout is invalid.")
         }
     }
 
     private fun ensureExpectedRuntimeLayout(runtimeVersion: String) {
-        if (!runtimeRoot(runtimeVersion).isDirectory) {
+        if (!hasExpectedRuntimeLayout(runtimeVersion)) {
             throw InvalidExtractedLayoutException("Extracted OpenClaw runtime layout is invalid.")
         }
     }
@@ -177,24 +180,132 @@ internal class BootstrapInstaller(
     }
 
     private fun deleteIfExists(file: File) {
-        if (file.exists() && !file.deleteRecursively()) {
-            throw IOException("Failed to reset install path '${file.absolutePath}'.")
+        val path = file.toPath()
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return
         }
+
+        Files.walkFileTree(
+            path,
+            object : SimpleFileVisitor<Path>() {
+                override fun visitFile(
+                    file: Path,
+                    attrs: BasicFileAttributes,
+                ): FileVisitResult {
+                    Files.deleteIfExists(file)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(
+                    dir: Path,
+                    exc: IOException?,
+                ): FileVisitResult {
+                    if (exc != null) {
+                        throw exc
+                    }
+                    Files.deleteIfExists(dir)
+                    return FileVisitResult.CONTINUE
+                }
+            },
+        )
     }
 
     private fun ensureDirectory(file: File) {
-        if (!file.exists() && !file.mkdirs() && !file.isDirectory) {
-            throw IOException("Failed to create directory '${file.absolutePath}'.")
+        val path = file.toPath()
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            Files.createDirectories(path)
         }
-        if (file.exists() && !file.isDirectory) {
+        if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
             throw IOException("Expected directory at '${file.absolutePath}'.")
         }
     }
 
-    private fun extractRuntimeVersion(manifest: BundledPayloadManifest): String? {
-        val runtimeArchiveEntry = manifest.payloads.firstOrNull { it.fileName == RUNTIME_ARCHIVE_FILE_NAME }
-            ?: return null
-        return RUNTIME_VERSION_REGEX.matchEntire(runtimeArchiveEntry.fileName)?.groupValues?.get(1)
+    private fun verifyStagedPayload(
+        stagedFile: File,
+        payloadEntry: BundledPayloadEntry,
+    ) {
+        if (stagedFile.length() != payloadEntry.sizeBytes) {
+            throw InvalidBundledPayloadException(
+                "Bundled payload '${payloadEntry.fileName}' size does not match the manifest."
+            )
+        }
+
+        val stagedSha256 = stagedFile.inputStream().use(::sha256)
+        if (stagedSha256 != payloadEntry.sha256) {
+            throw InvalidBundledPayloadException(
+                "Bundled payload '${payloadEntry.fileName}' SHA-256 digest does not match the manifest."
+            )
+        }
+    }
+
+    private fun hasExpectedRootFsLayout(): Boolean {
+        return hasRequiredRegularFiles(directories.extractedRootFsDir, ROOT_FS_MARKER_PATHS)
+    }
+
+    private fun hasExpectedRuntimeLayout(runtimeVersion: String): Boolean {
+        val runtimeRoot = runtimeRoot(runtimeVersion) ?: return false
+        return hasRequiredRegularFiles(runtimeRoot, RUNTIME_MARKER_PATHS)
+    }
+
+    private fun runtimeRoot(runtimeVersion: String): File? {
+        return directories.extractedRuntimeFilesDir
+            .listFiles()
+            ?.filter { candidate ->
+                candidate.name.startsWith("openclaw-$runtimeVersion-") &&
+                    Files.isDirectory(candidate.toPath(), LinkOption.NOFOLLOW_LINKS)
+            }
+            ?.singleOrNull()
+    }
+
+    private fun hasRequiredRegularFiles(
+        rootDir: File,
+        markerPaths: List<String>,
+    ): Boolean {
+        val rootPath = rootDir.toPath().toAbsolutePath().normalize()
+        return markerPaths.all { markerPath ->
+            val candidatePath = rootPath.resolve(markerPath).normalize()
+            candidatePath.startsWith(rootPath) &&
+                hasNoSymbolicLinkAncestors(rootPath, candidatePath.parent) &&
+                isRegularFile(candidatePath)
+        }
+    }
+
+    private fun isRegularFile(path: Path): Boolean {
+        return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+    }
+
+    private fun hasNoSymbolicLinkAncestors(
+        rootPath: Path,
+        path: Path?,
+    ): Boolean {
+        if (path == null) {
+            return true
+        }
+
+        var currentPath = rootPath
+        val relativePath = rootPath.relativize(path)
+        for (index in 0 until relativePath.nameCount) {
+            currentPath = currentPath.resolve(relativePath.getName(index))
+            if (Files.isSymbolicLink(currentPath)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun sha256(input: java.io.InputStream): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) {
+                break
+            }
+            if (read > 0) {
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 
     private fun installFailure(
@@ -218,15 +329,19 @@ internal class BootstrapInstaller(
         }
     }
 
-    private fun rootFsMarker(): File = File(directories.extractedRootFsDir, "installed-rootfs/debian")
-
-    private fun runtimeRoot(runtimeVersion: String): File =
-        File(directories.extractedRuntimeFilesDir, "openclaw-$runtimeVersion-1")
-
     private companion object {
-        const val ROOT_FS_FILE_NAME = "debian-rootfs.tar.xz"
-        const val RUNTIME_ARCHIVE_FILE_NAME = "openclaw-2026.3.13.tgz"
-        val RUNTIME_VERSION_REGEX = Regex("""openclaw-(\d+\.\d+\.\d+)\.tgz""")
+        val ROOT_FS_MARKER_PATHS = listOf(
+            "proot-distro/debian.sh",
+            "installed-rootfs/debian/etc/debian_version",
+            "installed-rootfs/debian/usr/lib/os-release",
+            "installed-rootfs/debian/usr/bin/bash",
+        )
+        val RUNTIME_MARKER_PATHS = listOf(
+            "package.json",
+            "pnpm-lock.yaml",
+            "pnpm-workspace.yaml",
+            "apps/android/app/src/main/AndroidManifest.xml",
+        )
     }
 }
 
@@ -235,6 +350,10 @@ private class MissingBundledPayloadException(
 ) : RuntimeException(message)
 
 private class InvalidExtractedLayoutException(
+    override val message: String,
+) : RuntimeException(message)
+
+private class InvalidBundledPayloadException(
     override val message: String,
 ) : RuntimeException(message)
 

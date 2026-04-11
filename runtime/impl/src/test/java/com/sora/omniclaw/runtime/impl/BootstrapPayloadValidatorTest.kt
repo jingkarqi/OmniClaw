@@ -22,6 +22,18 @@ class BootstrapPayloadValidatorTest {
     }
 
     @Test
+    fun `validate returns failure when manifest schema version is unsupported`() {
+        val result = validator.validate(
+            validManifest().copy(schemaVersion = 2)
+        )
+
+        assertPayloadFailure(
+            result = result,
+            message = "Bundled payload manifest schema version 2 is not supported.",
+        )
+    }
+
+    @Test
     fun `validate returns failure when required payload entry is missing`() {
         val result = validator.validate(
             BundledPayloadManifest(
@@ -31,8 +43,23 @@ class BootstrapPayloadValidatorTest {
 
         assertPayloadFailure(
             result = result,
-            message = "Bundled payload manifest is missing required payload entries: openclaw-2026.3.13.tgz.",
+            message = "Bundled payload manifest is missing required payload entries: openclaw-<version>.tgz.",
         )
+    }
+
+    @Test
+    fun `validate returns success when runtime archive entry declares a different version`() {
+        val manifest = BundledPayloadManifest(
+            payloads = listOf(
+                rootFsEntry(),
+                runtimeArchiveEntry(fileName = "openclaw-2030.1.2.tgz"),
+            )
+        )
+
+        val result = validator.validate(manifest)
+
+        assertTrue(result is HostResult.Success)
+        assertEquals(manifest, (result as HostResult.Success).value)
     }
 
     @Test
@@ -121,11 +148,12 @@ class BootstrapPayloadValidatorTest {
     }
 
     private fun runtimeArchiveEntry(
+        fileName: String = RUNTIME_ARCHIVE_FILE_NAME,
         sha256: String = VALID_SHA256.reversed(),
         sizeBytes: Long = 84L,
     ): BundledPayloadEntry {
         return BundledPayloadEntry(
-            fileName = RUNTIME_ARCHIVE_FILE_NAME,
+            fileName = fileName,
             sha256 = sha256,
             sizeBytes = sizeBytes,
         )
