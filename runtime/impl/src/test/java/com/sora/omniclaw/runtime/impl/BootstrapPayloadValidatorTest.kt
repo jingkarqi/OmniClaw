@@ -34,6 +34,18 @@ class BootstrapPayloadValidatorTest {
     }
 
     @Test
+    fun `validate returns failure when manifest payload list is empty`() {
+        val result = validator.validate(
+            BundledPayloadManifest(payloads = emptyList())
+        )
+
+        assertPayloadFailure(
+            result = result,
+            message = "Bundled payload manifest must declare bundled payload entries.",
+        )
+    }
+
+    @Test
     fun `validate returns failure when required payload entry is missing`() {
         val result = validator.validate(
             BundledPayloadManifest(
@@ -44,6 +56,24 @@ class BootstrapPayloadValidatorTest {
         assertPayloadFailure(
             result = result,
             message = "Bundled payload manifest is missing required payload entries: openclaw-<version>.tgz.",
+        )
+    }
+
+    @Test
+    fun `validate returns failure when manifest declares multiple runtime archive entries`() {
+        val result = validator.validate(
+            BundledPayloadManifest(
+                payloads = listOf(
+                    rootFsEntry(),
+                    runtimeArchiveEntry(fileName = "openclaw-2026.3.13.tgz"),
+                    runtimeArchiveEntry(fileName = "openclaw-2030.1.2.tgz"),
+                )
+            )
+        )
+
+        assertPayloadFailure(
+            result = result,
+            message = "Bundled payload manifest must declare exactly one runtime archive entry matching openclaw-<version>.tgz.",
         )
     }
 
