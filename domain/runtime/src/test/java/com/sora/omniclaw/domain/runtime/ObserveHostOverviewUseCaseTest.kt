@@ -3,21 +3,21 @@ package com.sora.omniclaw.domain.runtime
 import com.sora.omniclaw.core.model.BridgeLifecycleState
 import com.sora.omniclaw.core.model.BridgeStatus
 import com.sora.omniclaw.core.model.HostLifecycleState
-import com.sora.omniclaw.core.model.HostOverview
 import com.sora.omniclaw.core.model.PermissionGrantState
 import com.sora.omniclaw.core.model.PermissionStatus
 import com.sora.omniclaw.core.model.PermissionSummary
-import com.sora.omniclaw.core.model.ProviderConfigDraft
+import com.sora.omniclaw.core.model.ProviderRuntimeExport
 import com.sora.omniclaw.core.model.RuntimeStatus
-import com.sora.omniclaw.core.storage.ProviderConfigStore
+import com.sora.omniclaw.core.storage.ProviderExportStore
 import com.sora.omniclaw.core.storage.SecretStore
+import com.sora.omniclaw.core.common.HostResult
 import com.sora.omniclaw.testing.fake.FakeBridgeServer
 import com.sora.omniclaw.testing.fake.FakeDeviceCapabilityGateway
 import com.sora.omniclaw.testing.fake.FakeRuntimeManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.async
@@ -52,20 +52,20 @@ class ObserveHostOverviewUseCaseTest {
                 )
             )
         )
-        val configStore = FakeOverviewProviderConfigStore(
-            initialDraft = ProviderConfigDraft(
+        val exportStore = FakeOverviewProviderExportStore(
+            initialExport = ProviderRuntimeExport(
                 providerId = "openai-compatible",
                 baseUrl = "https://api.example.com",
                 modelName = "gpt-test",
-                hasStoredApiKey = true,
             )
         )
+        val secretStore = FakeOverviewSecretStore(initialAvailability = true)
         val useCase = ObserveHostOverviewUseCase(
             runtimeManager = runtimeManager,
             bridgeServer = bridgeServer,
             deviceCapabilityGateway = capabilityGateway,
-            providerConfigStore = configStore,
-            secretStore = FakeOverviewSecretStore(hasApiKey = true),
+            providerExportStore = exportStore,
+            secretStore = secretStore,
         )
 
         val overview = useCase().first()
@@ -77,20 +77,19 @@ class ObserveHostOverviewUseCaseTest {
     }
 
     @Test
-    fun `reports provider not ready when stored flag exists but secret store has no api key`() = runBlocking {
+    fun `reports provider not ready when export metadata exists but secret store has no api key`() = runBlocking {
         val useCase = ObserveHostOverviewUseCase(
             runtimeManager = FakeRuntimeManager(),
             bridgeServer = FakeBridgeServer(),
             deviceCapabilityGateway = FakeDeviceCapabilityGateway(),
-            providerConfigStore = FakeOverviewProviderConfigStore(
-                initialDraft = ProviderConfigDraft(
+            providerExportStore = FakeOverviewProviderExportStore(
+                initialExport = ProviderRuntimeExport(
                     providerId = "openai-compatible",
                     baseUrl = "https://api.example.com",
                     modelName = "gpt-test",
-                    hasStoredApiKey = true,
                 )
             ),
-            secretStore = FakeOverviewSecretStore(hasApiKey = false),
+            secretStore = FakeOverviewSecretStore(initialAvailability = false),
         )
 
         val overview = useCase().first()
@@ -100,19 +99,19 @@ class ObserveHostOverviewUseCaseTest {
 
     @Test
     fun `emits new overview when secret availability changes without other upstream updates`() = runBlocking {
-        val secretStore = FakeOverviewSecretStore(hasApiKey = false)
+        val exportStore = FakeOverviewProviderExportStore(
+            initialExport = ProviderRuntimeExport(
+                providerId = "openai-compatible",
+                baseUrl = "https://api.example.com",
+                modelName = "gpt-test",
+            )
+        )
+        val secretStore = FakeOverviewSecretStore(initialAvailability = false)
         val useCase = ObserveHostOverviewUseCase(
             runtimeManager = FakeRuntimeManager(),
             bridgeServer = FakeBridgeServer(),
             deviceCapabilityGateway = FakeDeviceCapabilityGateway(),
-            providerConfigStore = FakeOverviewProviderConfigStore(
-                initialDraft = ProviderConfigDraft(
-                    providerId = "openai-compatible",
-                    baseUrl = "https://api.example.com",
-                    modelName = "gpt-test",
-                    hasStoredApiKey = false,
-                )
-            ),
+            providerExportStore = exportStore,
             secretStore = secretStore,
         )
         val initial = useCase().first()
@@ -121,7 +120,7 @@ class ObserveHostOverviewUseCaseTest {
         }
 
         yield()
-        secretStore.updateHasApiKey(true)
+        secretStore.updateAvailability(true)
         val updated = updatedDeferred.await()
 
         assertEquals(false, initial.providerConfigReady)
@@ -129,32 +128,42 @@ class ObserveHostOverviewUseCaseTest {
     }
 }
 
-private class FakeOverviewProviderConfigStore(
-    initialDraft: ProviderConfigDraft,
-) : ProviderConfigStore {
-    private val drafts = MutableStateFlow(initialDraft)
+private class FakeOverviewProviderExportStore(
+    initialExport: ProviderRuntimeExport?,
+) : ProviderExportStore {
+    private val exports = MutableStateFlow(initialExport)
 
-    override fun observeDraft(): Flow<ProviderConfigDraft> = drafts
+    override suspend fun readExport(): ProviderRuntimeExport? = exports.value
 
-    override suspend fun saveDraft(draft: ProviderConfigDraft) = throw UnsupportedOperationException()
+    override fun observeExport(): Flow<ProviderRuntimeExport?> = exports
+
+    override fun observeExportReadiness(): Flow<Boolean> = exports.map { it?.isReady == true }
+
+    override suspend fun writeExport(export: ProviderRuntimeExport) = throw UnsupportedOperationException()
+
+    override suspend fun clearExport() = throw UnsupportedOperationException()
+
+    fun updateExport(export: ProviderRuntimeExport?) {
+        exports.value = export
+    }
 }
 
 private class FakeOverviewSecretStore(
-    hasApiKey: Boolean,
+    initialAvailability: Boolean,
 ) : SecretStore {
-    private val apiKeyState = MutableStateFlow(hasApiKey)
+    private val availability = MutableStateFlow(initialAvailability)
 
-    override suspend fun saveApiKey(apiKey: String) = throw UnsupportedOperationException()
+    override suspend fun saveApiKey(apiKey: String): HostResult<Unit> = throw UnsupportedOperationException()
 
-    override suspend fun readApiKey(): String? = if (apiKeyState.value) "stored-secret" else null
+    override suspend fun readApiKey(): String? = if (availability.value) "stored-secret" else null
 
-    override suspend fun hasApiKey(): Boolean = apiKeyState.value
+    override suspend fun hasApiKey(): Boolean = availability.value
 
-    override fun observeApiKeyAvailability(): Flow<Boolean> = apiKeyState
+    override fun observeApiKeyAvailability(): Flow<Boolean> = availability
 
-    override suspend fun clearApiKey() = throw UnsupportedOperationException()
+    override suspend fun clearApiKey(): HostResult<Unit> = throw UnsupportedOperationException()
 
-    fun updateHasApiKey(value: Boolean) {
-        apiKeyState.value = value
+    fun updateAvailability(hasApiKey: Boolean) {
+        availability.value = hasApiKey
     }
 }

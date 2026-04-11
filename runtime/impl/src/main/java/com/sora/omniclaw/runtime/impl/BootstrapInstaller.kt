@@ -15,7 +15,7 @@ import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 
-internal interface BundledPayloadSource {
+interface BundledPayloadSource {
     fun openBundledPayload(fileName: String): HostResult<java.io.InputStream>
 }
 

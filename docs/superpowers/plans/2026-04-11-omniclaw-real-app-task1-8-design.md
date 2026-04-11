@@ -1,6 +1,8 @@
 # OmniClaw Real App Tasks 1-8 Completion Design
 
 > This design is the implementation contract for `codex/real-app-task1-8`. It refines the roadmap in [`2026-04-10-omniclaw-real-app-roadmap.md`](./2026-04-10-omniclaw-real-app-roadmap.md) and the dependency-ordered detail plan in [`2026-04-10-omniclaw-real-app-phases-1-3-detailed.md`](./2026-04-10-omniclaw-real-app-phases-1-3-detailed.md).
+>
+> **Status:** Historical design record for the completed Task 1-8 branch work on 2026-04-11. Baseline assumptions, proposed filenames, and sequencing below describe pre-completion intent and may differ from the final repository behavior. Use the updated roadmap, phases, and progress documents for the current repository baseline.
 
 ## Goal
 
@@ -8,7 +10,7 @@ Complete Tasks 1-8 in strict dependency order by:
 
 - finishing the remaining payload-validation and install-foundation gaps,
 - replacing `StubRuntimeManager` with a real runtime host path,
-- exporting real provider configuration into the runtime workspace, and
+- persisting non-secret provider export metadata and materializing runtime config at start time, and
 - wiring start gating and surfaced state around that real runtime path.
 
 ## Non-Goals
@@ -92,7 +94,7 @@ The minimum collaborator set for Tasks 5-8 is:
 - `HostControlStateStore`
   - Persists `desiredRunning`, last blocking state, and last recoverable failure so service recreation can decide whether to re-enter recovery or stay stopped.
 - `RuntimeProviderConfigWriter`
-  - Builds the runtime-facing config representation from `ProviderConfigStore` and `SecretStore`, writes it into `runtime/config/`, and reports export-specific failures.
+  - Builds the runtime-facing config representation from `ProviderRuntimeExport` plus `SecretStore`, writes `openclaw.json5` into `runtime/config/`, and reports config-materialization-specific failures.
 - `RuntimeProcessLauncher`
   - Creates the real process command, working directory, environment, stdout/stderr destinations, and launches the runtime process.
 - `RuntimeHealthChecker`
@@ -108,7 +110,7 @@ The real launch path should be the smallest credible path supported by the bundl
 
 1. Ensure the bundled manifest validates.
 2. Ensure the runtime workspace is installed and layout-valid.
-3. Ensure runtime config exists and is fresh enough for the current provider draft.
+3. Ensure export metadata and secret availability are present so runtime config can be materialized for the current provider state.
 4. Launch the bundled OpenClaw runtime from the extracted runtime archive using the Debian rootfs Node toolchain.
 4. Launch the rootfs-global `openclaw` CLI using the Debian rootfs toolchain, while treating the extracted `openclaw-<version>-*/` tree as workspace/context rather than the direct executable.
 5. Capture stdout/stderr into files under `runtime/logs/`.
@@ -142,10 +144,10 @@ To keep domain modules decoupled from `runtime:impl`, the branch should introduc
 
 The consistent rule for Tasks 7-8 is:
 
-- export on every successful save, and
-- re-export immediately before runtime start if the generated config is missing or stale.
+- write non-secret export metadata on every successful save, and
+- materialize `openclaw.json5` from export metadata plus the secret during runtime start.
 
-This provides both early feedback and start-time correctness.
+This provides both early feedback for metadata validity and start-time correctness for the secret-bearing runtime config.
 
 ### Export Failure Semantics
 
@@ -153,14 +155,15 @@ The implementation must distinguish:
 
 - Android-side draft storage success,
 - secret-storage success,
-- runtime-config export failure,
-- runtime launch failure after a successful export.
+- metadata export failure,
+- runtime-config materialization failure,
+- runtime launch failure after successful config materialization.
 
 Those failure classes should map to different `HostErrorCategory` or at least different error messages and diagnostics headlines, so the UI and tests can tell them apart.
 
 ### Runtime Config Location
 
-The generated config belongs under `runtime/config/` with a stable filename such as `provider.json` or `openclaw.config.json`. The runtime should read it through an explicit environment variable or command argument rather than relying on a default config search path.
+The generated config belongs under `runtime/config/` with the stable filename `openclaw.json5`. The runtime should read it through an explicit environment variable or command argument rather than relying on a default config search path.
 
 ## Domain And Service Adaptation
 
@@ -169,7 +172,7 @@ The generated config belongs under `runtime/config/` with a stable filename such
 `StartHostUseCase` must stop treating provider completeness as purely an Android form concern. Its new startup contract is:
 
 1. required permissions granted,
-2. provider export readiness sufficient for launch,
+2. provider export metadata plus secret availability sufficient for launch,
 3. bridge started,
 4. runtime start requested,
 5. bridge rolled back if runtime start fails.

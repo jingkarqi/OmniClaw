@@ -5,7 +5,7 @@ import com.sora.omniclaw.bridge.api.DeviceCapabilityGateway
 import com.sora.omniclaw.core.common.HostError
 import com.sora.omniclaw.core.common.HostErrorCategory
 import com.sora.omniclaw.core.common.HostResult
-import com.sora.omniclaw.core.storage.ProviderConfigStore
+import com.sora.omniclaw.core.storage.ProviderExportStore
 import com.sora.omniclaw.core.storage.SecretStore
 import com.sora.omniclaw.runtime.api.RuntimeManager
 import kotlinx.coroutines.flow.first
@@ -14,7 +14,7 @@ class StartHostUseCase(
     private val bridgeServer: BridgeServer,
     private val runtimeManager: RuntimeManager,
     private val deviceCapabilityGateway: DeviceCapabilityGateway,
-    private val providerConfigStore: ProviderConfigStore,
+    private val providerExportStore: ProviderExportStore,
     private val secretStore: SecretStore,
 ) {
     suspend operator fun invoke(): HostResult<Unit> {
@@ -29,12 +29,11 @@ class StartHostUseCase(
             )
         }
 
-        val providerDraft = providerConfigStore.observeDraft().first()
-        if (!providerDraft.isConfigured(hasAvailableSecret = secretStore.hasApiKey())) {
+        if (!providerExportStore.observeExportReadiness().first() || !secretStore.hasApiKey()) {
             return HostResult.Failure(
                 HostError(
                     category = HostErrorCategory.Validation,
-                    message = "Provider configuration is incomplete.",
+                    message = "Runtime provider export or secret is missing.",
                     recoverable = true,
                 )
             )

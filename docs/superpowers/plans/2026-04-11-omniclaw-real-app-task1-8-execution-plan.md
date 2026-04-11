@@ -1,6 +1,8 @@
 # OmniClaw Real App Tasks 1-8 Execution Plan
 
 > Execution plan for `codex/real-app-task1-8`. Follow dependency order strictly and keep milestone commits small and reviewable.
+>
+> **Status:** Historical execution record for the completed Task 1-8 branch work on 2026-04-11. This document is no longer the live progress source, and unchecked boxes below are archival snapshots of the original plan rather than current status.
 
 ## Phase A: Design And Baseline
 
@@ -63,16 +65,16 @@
 - [ ] Add `RuntimeProviderConfig`.
 - [ ] Add `RuntimeProviderConfigWriter`.
 - [ ] Define the stable generated-config filename and workspace location.
-- [ ] Add tests for valid export, missing secret, missing fields, and overwrite behavior.
+- [ ] Add tests for valid metadata export, missing secret at config materialization time, missing fields, and overwrite behavior.
 - [ ] Run `:runtime:impl:testDebugUnitTest`.
 - [ ] Commit the provider-export contract slice.
 
 ## Phase F: Implement Task 8 Save And Start Wiring
 
-- [ ] Wire export into successful provider saves.
-- [ ] Make runtime start re-export when generated config is missing or stale.
-- [ ] Make start gating depend on real export readiness, not only form completeness.
-- [ ] Surface export-specific failure semantics through domain/runtime and provider flows.
+- [ ] Wire non-secret export metadata into successful provider saves.
+- [ ] Make runtime start materialize `openclaw.json5` from export metadata plus the stored secret.
+- [ ] Make start gating depend on export metadata readiness plus secret availability, not only form completeness.
+- [ ] Surface metadata-export and config-materialization failure semantics through domain/runtime and provider flows.
 - [ ] Update tests in `domain/provider`, `domain/runtime`, and `runtime:impl`.
 - [ ] Run `:domain:provider:testDebugUnitTest :domain:runtime:testDebugUnitTest :runtime:impl:testDebugUnitTest`.
 - [ ] Commit the provider wiring slice.

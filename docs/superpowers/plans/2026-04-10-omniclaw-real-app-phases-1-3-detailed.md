@@ -1,10 +1,12 @@
 # OmniClaw Real App Phases 1-3 Detailed Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Status update (2026-04-11):** Tasks 1-8 are complete in the repository. Task 9 remains open as the integration checkpoint for Phases 1-3, and Phase 4+ work remains open. The summary below is now the live status source; the detailed task checklists are preserved as implementation history and should not be used as the current baseline on their own.
 
-**Goal:** Replace the current placeholder bootstrap inputs and stub runtime integration with a real runtime installation and startup path that consumes real provider configuration and can support the first truly usable host workflow.
+**Goal:** Replace the current placeholder bootstrap inputs and stub runtime integration with a real runtime installation and startup path that consumes provider export metadata, materializes secret-bearing runtime config only at start time, and can support the first truly usable host workflow.
 
-**Architecture:** Execute the work in three dependency-ordered layers. First, make the packaged payload inputs real and verifiable. Second, replace `StubRuntimeManager` with a real install/start/stop/observe implementation that owns filesystem layout, extraction, launch, and diagnostics. Third, export provider configuration into the runtime workspace so a real runtime launch has valid inputs. Keep `app` and `feature:*` unchanged unless runtime or provider integration requires new surfaced state.
+**Architecture:** Execute the work in three dependency-ordered layers. First, make the packaged payload inputs real and verifiable. Second, replace `StubRuntimeManager` with a real install/start/stop/observe implementation that owns filesystem layout, extraction, launch, and diagnostics. Third, persist non-secret provider export metadata and materialize secret-bearing `openclaw.json5` only during runtime start so a real runtime launch has valid inputs. Keep `app` and `feature:*` unchanged unless runtime or provider integration requires new surfaced state.
 
 **Tech Stack:** Kotlin, Android app-private storage, packaged assets in `assets/bootstrap/`, foreground service, PowerShell manifest generation, Android Keystore, DataStore, coroutines and Flow, process and filesystem management in `runtime:impl`.
 
@@ -17,13 +19,33 @@
 - This plan does not redesign `feature:*` modules; UI changes should be limited to exposing newly available runtime state and errors only when required.
 - This plan does not change the `assets/bootstrap/` contract introduced by the heavy skeleton.
 
+## Completion Status
+
+- [x] Task 1: real bootstrap archives replaced and APK-level asset verification added.
+- [x] Task 2: runtime-side payload validation is implemented and covered by tests.
+- [x] Task 3: runtime workspace layout and persisted install-state model are implemented.
+- [x] Task 4: bootstrap extraction and installation are implemented, idempotent, and tested.
+- [x] Task 5: `RealRuntimeManager`, runtime process launch, health checks, and log capture are wired into `app`.
+- [x] Task 6: domain and foreground-service behavior now reflect real runtime install/start/stop/recovery semantics.
+- [x] Task 7: non-secret `ProviderRuntimeExport` metadata and start-time `openclaw.json5` materialization are implemented.
+- [x] Task 8: provider export/save wiring, readiness semantics, and `openclaw.json5` cleanup on stop or failure are implemented.
+- [ ] Task 9: keep open for a later end-to-end integration checkpoint once the real local bridge work starts.
+
 ## Current Baseline Assumptions
 
 - `runtime/payloads/src/main/assets/bootstrap/` exists and is already merged into the APK.
 - [`scripts/generate-bootstrap-manifest.ps1`](/E:/GitHub/OmniClaw/scripts/generate-bootstrap-manifest.ps1) is the manifest-generation entry point.
 - [`runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/AssetPayloadLocator.kt`](/E:/GitHub/OmniClaw/runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/AssetPayloadLocator.kt) is the only manifest lookup path.
-- [`runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/StubRuntimeManager.kt`](/E:/GitHub/OmniClaw/runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/StubRuntimeManager.kt) is still the active runtime manager implementation.
-- [`domain/provider`]( /E:/GitHub/OmniClaw/domain/provider ) and [`core/storage`]( /E:/GitHub/OmniClaw/core/storage ) already provide the saved draft plus secret-storage base needed for runtime config export.
+- [`runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/RealRuntimeManager.kt`](/E:/GitHub/OmniClaw/runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/RealRuntimeManager.kt) is now the active runtime manager implementation.
+- [`domain/provider`]( /E:/GitHub/OmniClaw/domain/provider ) and [`core/storage`]( /E:/GitHub/OmniClaw/core/storage ) now provide the saved draft, non-secret runtime-export metadata, and secret availability used by runtime start gating.
+
+## Live Status Clarification
+
+- `ProviderRuntimeExport` is a non-secret metadata record only; it does not carry the provider API key.
+- `SecretStore` is read only when `RealRuntimeManager` materializes `runtime/config/openclaw.json5` during runtime start.
+- Provider readiness and host start gating require both export-metadata readiness and secret availability.
+- `openclaw.json5` is removed when runtime stop succeeds and when runtime start fails or aborts.
+- Task 1-8 is complete; Task 9 remains open as a later integration checkpoint after more bridge work exists.
 
 ## File Structure Map
 
@@ -168,7 +190,9 @@
 
 ## Phase 3: Real Provider Config Export
 
-### Task 7: Define Runtime-Facing Provider Export Contract
+> **Archival note:** The task checklists below are preserved from the pre-completion implementation plan. Use the completion summary and live-status clarification above for the current repository baseline.
+
+### Task 7: Define Runtime-Facing Provider Export Metadata Contract
 
 **Files:**
 - Create: `runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/RuntimeProviderConfigWriter.kt`
@@ -176,17 +200,17 @@
 - Modify if needed: `core/model/src/main/java/com/sora/omniclaw/core/model/ProviderConfigDraft.kt`
 - Create: `runtime/impl/src/test/java/com/sora/omniclaw/runtime/impl/RuntimeProviderConfigWriterTest.kt`
 
-- [ ] Define the exact runtime-facing config file shape and target location inside the runtime workspace.
-- [ ] Keep Android-side provider editing models separate from the runtime-export file representation.
-- [ ] Ensure secret material is read from `SecretStore` only at export time and is not reintroduced into long-lived UI state.
+- [ ] Define the exact `ProviderRuntimeExport` metadata shape and the runtime config file shape and target location inside the runtime workspace.
+- [ ] Keep Android-side provider editing models separate from both the stored export metadata and the secret-bearing runtime config file.
+- [ ] Ensure secret material is read from `SecretStore` only when materializing `openclaw.json5` during runtime start and is not reintroduced into long-lived UI state.
 - [ ] Add tests for valid export, missing secret, missing required fields, and overwrite behavior.
 - [ ] Commit the export contract before wiring it into runtime start.
 
 **Verification:**
 - `.\gradlew.bat :runtime:impl:testDebugUnitTest`
-- Expected: runtime-config export succeeds only when real provider readiness exists.
+- Expected: non-secret export metadata is valid on save, and runtime config materialization succeeds only when export metadata plus secret availability are both present.
 
-### Task 8: Wire Provider Export Into Save And Start Paths
+### Task 8: Wire Provider Export Metadata Into Save And Start Paths
 
 **Files:**
 - Modify: `domain/provider/src/main/java/com/sora/omniclaw/domain/provider/SaveProviderConfigUseCase.kt`
@@ -195,15 +219,15 @@
 - Modify: `runtime/impl/src/main/java/com/sora/omniclaw/runtime/impl/RealRuntimeManager.kt`
 - Modify tests under `domain/provider/src/test/`, `domain/runtime/src/test/`, and `runtime/impl/src/test/`
 
-- [ ] Decide whether config export occurs on every successful save, immediately before runtime start, or both; then apply one consistent rule.
-- [ ] Ensure host startup refuses to proceed if exported runtime config is missing or invalid even when Android-side draft fields look complete.
-- [ ] Ensure provider-ready UI state remains driven by real secret availability and successful export preconditions.
-- [ ] Add tests that distinguish storage success from export failure and export success from runtime launch failure.
+- [ ] Apply one consistent rule: write non-secret export metadata on successful save, then materialize `openclaw.json5` from export metadata plus `SecretStore` during runtime start.
+- [ ] Ensure host startup refuses to proceed if export metadata is missing or invalid, or if the secret is unavailable, even when Android-side draft fields look complete.
+- [ ] Ensure provider-ready UI state remains driven by export-metadata readiness plus secret availability.
+- [ ] Add tests that distinguish storage success from metadata export failure, metadata export success from config-materialization failure, and config materialization success from runtime launch failure.
 - [ ] Commit provider-export wiring separately from any later bridge work.
 
 **Verification:**
 - `.\gradlew.bat :domain:provider:testDebugUnitTest :domain:runtime:testDebugUnitTest :runtime:impl:testDebugUnitTest`
-- Expected: provider save, provider observe, and host start all reflect real runtime-config requirements.
+- Expected: provider save, provider observe, and host start all reflect metadata export readiness, secret availability, and start-time config materialization requirements.
 
 ### Task 9: End-To-End Verification For Phases 1-3
 
@@ -228,14 +252,14 @@
 
 ## Execution Order
 
-- [ ] Complete Task 1 before changing runtime validation logic.
-- [ ] Complete Task 2 before implementing extraction and install-state persistence.
-- [ ] Complete Task 3 before implementing the installer.
-- [ ] Complete Task 4 before replacing `StubRuntimeManager`.
-- [ ] Complete Task 5 before adapting domain and service behavior.
-- [ ] Complete Task 6 before wiring provider export into runtime startup.
-- [ ] Complete Task 7 before Task 8.
-- [ ] Complete Task 8 before integration verification in Task 9.
+- [x] Complete Task 1 before changing runtime validation logic.
+- [x] Complete Task 2 before implementing extraction and install-state persistence.
+- [x] Complete Task 3 before implementing the installer.
+- [x] Complete Task 4 before replacing `StubRuntimeManager`.
+- [x] Complete Task 5 before adapting domain and service behavior.
+- [x] Complete Task 6 before wiring provider export into runtime startup.
+- [x] Complete Task 7 before Task 8.
+- [x] Complete Task 8 before integration verification in Task 9.
 
 ## Risks To Watch
 

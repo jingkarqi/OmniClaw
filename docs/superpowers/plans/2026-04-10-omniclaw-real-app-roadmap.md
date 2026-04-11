@@ -1,6 +1,8 @@
 # OmniClaw Real App Roadmap Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Status update (2026-04-11):** Tasks 1-8 are complete in the repository. Task 9 and the remaining Phase 4-8 work are still open. The baseline and execution-order sections below have been updated so this document does not continue pointing people back at the old stub-runtime state.
 
 **Goal:** Move OmniClaw from the completed heavy skeleton to a genuinely usable Android host app that can package real runtime assets, start and stop a real OpenClaw runtime, expose a real local bridge, and support recovery, diagnostics, and user-facing operational flows.
 
@@ -12,14 +14,14 @@
 
 ## Current Baseline
 
-- The heavy skeleton is in place through Task 7.
+- The repository has completed Tasks 1-8 and now has a real packaged bootstrap path, a real runtime install/start/stop path, and runtime-facing provider export wiring.
 - `app` has a real `Application`, `AppGraph`, navigation shell, and service launcher wiring.
-- `service:host` has a real foreground-service skeleton and start/stop entry points.
-- `core:storage` persists provider config and secrets.
-- `runtime:payloads` is packaged into the APK and exposes the fixed `assets/bootstrap/` path.
-- `runtime:impl` is still driven by `StubRuntimeManager`.
-- `bridge:impl` is still driven by stub bridge and stub device gateway implementations.
-- The current payload archives are placeholder bootstrap artifacts, not production runtime assets.
+- `service:host` persists desired host state and distinguishes recoverable runtime-start failures from fatal ones.
+- `core:storage` persists provider drafts, non-secret `ProviderRuntimeExport` metadata, and secrets; provider readiness depends on export metadata plus secret availability.
+- `runtime:payloads` is packaged into the APK under `assets/bootstrap/`, and APK-level verification is automated.
+- `runtime:impl` is now driven by `RealRuntimeManager`, install-state persistence, launch-state persistence, start-time `openclaw.json5` materialization, cleanup on stop or failed start, log capture, and real process launching.
+- `bridge:impl` is still driven by stub bridge and stub device gateway implementations; Phase 4 remains the next major milestone.
+- The bundled payload archives are real bootstrap inputs, but the app is not yet “genuinely usable” because the real local bridge and end-to-end capability path are still pending.
 
 ## Definition Of “Real Usable”
 
@@ -27,12 +29,16 @@ The app should count as genuinely usable only when all of the following are true
 
 - A user can install the APK and complete the required setup flow without developer tools.
 - Real runtime payloads are bundled, validated, and unpacked correctly.
-- Provider configuration saved in Android is exported into the runtime’s real configuration surface.
+- Provider configuration saved in Android is persisted as non-secret runtime-export metadata, and the secret is read only when the runtime materializes its launch config.
 - The host can start, stop, and recover a real OpenClaw runtime instead of switching stub state only.
 - The runtime can connect to a real local bridge and successfully call at least one real Android-backed capability.
 - The UI exposes real state, real failures, and actionable recovery or diagnostics paths.
 
 ## Phase 1: Replace Placeholder Payloads With Real Bootstrap Inputs
+
+**Status**
+
+- Complete on 2026-04-11.
 
 **Objective**
 
@@ -59,6 +65,10 @@ The app should count as genuinely usable only when all of the following are true
 - Runtime payload loading reads real bundled inputs without relying on placeholders.
 
 ## Phase 2: Turn `runtime:impl` Into A Real Runtime Host
+
+**Status**
+
+- Complete on 2026-04-11.
 
 **Objective**
 
@@ -88,16 +98,21 @@ The app should count as genuinely usable only when all of the following are true
 
 ## Phase 3: Export Real Provider Configuration Into Runtime Startup
 
+**Status**
+
+- Complete on 2026-04-11.
+
 **Objective**
 
-- Make saved provider configuration operational by exporting it into the runtime’s real configuration input before launch.
+- Make saved provider configuration operational by exporting non-secret metadata ahead of launch and materializing secret-bearing `openclaw.json5` only during runtime start.
 
 **Primary Work**
 
-- Build a runtime-facing config export format from `ProviderConfigStore` and `SecretStore`.
-- Write exported config into the runtime workspace in a predictable location.
-- Define when config is regenerated: initial install, explicit save, and before runtime start.
-- Distinguish between storage success, config export failure, and runtime consumption failure.
+- Persist a non-secret `ProviderRuntimeExport` metadata record from `ProviderConfigStore`.
+- Read the API key from `SecretStore` only when materializing `openclaw.json5` into the runtime workspace during start.
+- Treat provider readiness as export-metadata readiness plus secret availability, not Android-form completeness alone.
+- Remove generated `openclaw.json5` on runtime stop and on failed runtime-start paths.
+- Distinguish between storage success, metadata export failure, config materialization failure, and runtime consumption failure.
 - Keep UI truth sourced through domain use cases instead of raw storage reads.
 
 **Modules Most Affected**
@@ -109,9 +124,10 @@ The app should count as genuinely usable only when all of the following are true
 
 **Exit Criteria**
 
-- Saving provider config changes the next runtime launch behavior for real.
-- Start gating uses real exported config readiness, not only Android-side form completeness.
-- Runtime diagnostics can identify configuration export failures separately from runtime boot failures.
+- Saving provider config changes the next runtime launch behavior through non-secret export metadata.
+- Start gating uses export metadata readiness plus secret availability, not only Android-side form completeness.
+- Runtime start materializes `openclaw.json5` only for launch and cleans it up on stop or failed start.
+- Runtime diagnostics can identify metadata export or config-materialization failures separately from runtime boot failures.
 
 ## Phase 4: Replace Stub Bridge With A Real Local Bridge Server
 
@@ -249,9 +265,9 @@ The app should count as genuinely usable only when all of the following are true
 
 ## Recommended Execution Order
 
-- [ ] Finish Phase 1 before replacing `StubRuntimeManager`.
-- [ ] Finish Phase 2 before claiming real runtime usability.
-- [ ] Finish Phase 3 before widening bridge capability work.
+- [x] Finish Phase 1 before replacing `StubRuntimeManager`.
+- [x] Finish Phase 2 before claiming real runtime usability.
+- [x] Finish Phase 3 before widening bridge capability work.
 - [ ] Finish Phase 4 before calling the host-runtime integration end to end.
 - [ ] Finish Phase 5 before treating service behavior as production-ready.
 - [ ] Finish Phase 6 before treating the app as user-operable.

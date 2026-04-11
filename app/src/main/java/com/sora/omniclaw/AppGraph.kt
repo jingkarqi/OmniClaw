@@ -10,9 +10,11 @@ import com.sora.omniclaw.core.model.HostOverview
 import com.sora.omniclaw.core.model.PermissionSummary
 import com.sora.omniclaw.core.model.ProviderConfigDraft
 import com.sora.omniclaw.core.model.RuntimeStatus
+import com.sora.omniclaw.core.storage.AndroidProviderExportStore
 import com.sora.omniclaw.core.storage.AndroidProviderConfigStore
 import com.sora.omniclaw.core.storage.AndroidSecretStore
 import com.sora.omniclaw.core.storage.ProviderConfigStore
+import com.sora.omniclaw.core.storage.ProviderExportStore
 import com.sora.omniclaw.core.storage.SecretStore
 import com.sora.omniclaw.domain.bridge.ObservePermissionSummaryUseCase
 import com.sora.omniclaw.domain.provider.ObserveProviderConfigUseCase
@@ -23,7 +25,8 @@ import com.sora.omniclaw.domain.runtime.StopHostUseCase
 import com.sora.omniclaw.runtime.api.PayloadLocator
 import com.sora.omniclaw.runtime.api.RuntimeManager
 import com.sora.omniclaw.runtime.impl.AssetPayloadLocator
-import com.sora.omniclaw.runtime.impl.StubRuntimeManager
+import com.sora.omniclaw.runtime.impl.RealRuntimeManager
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -40,9 +43,16 @@ class AppGraph(
         AndroidSecretStore(applicationContext)
     }
 
-    private val payloadLocator: PayloadLocator by lazy {
+    private val providerExportStore: ProviderExportStore by lazy {
+        AndroidProviderExportStore(applicationContext)
+    }
+
+    private val assetPayloadLocator: AssetPayloadLocator by lazy {
         AssetPayloadLocator(applicationContext)
     }
+
+    private val payloadLocator: PayloadLocator
+        get() = assetPayloadLocator
 
     private val bridgeServer: BridgeServer by lazy {
         StubBridgeServer()
@@ -53,7 +63,13 @@ class AppGraph(
     }
 
     val runtimeManager: RuntimeManager by lazy {
-        StubRuntimeManager(payloadLocator)
+        RealRuntimeManager(
+            payloadLocator = assetPayloadLocator,
+            payloadSource = assetPayloadLocator,
+            workspaceRoot = File(applicationContext.filesDir, "omniclaw-runtime"),
+            providerExportStore = providerExportStore,
+            secretStore = secretStore,
+        )
     }
 
     private val observeProviderConfigUseCase: ObserveProviderConfigUseCase by lazy {
@@ -67,6 +83,7 @@ class AppGraph(
         SaveProviderConfigUseCase(
             providerConfigStore = providerConfigStore,
             secretStore = secretStore,
+            providerExportStore = providerExportStore,
         )
     }
 
@@ -81,7 +98,7 @@ class AppGraph(
             runtimeManager = runtimeManager,
             bridgeServer = bridgeServer,
             deviceCapabilityGateway = deviceCapabilityGateway,
-            providerConfigStore = providerConfigStore,
+            providerExportStore = providerExportStore,
             secretStore = secretStore,
         )
     }
@@ -91,7 +108,7 @@ class AppGraph(
             bridgeServer = bridgeServer,
             runtimeManager = runtimeManager,
             deviceCapabilityGateway = deviceCapabilityGateway,
-            providerConfigStore = providerConfigStore,
+            providerExportStore = providerExportStore,
             secretStore = secretStore,
         )
     }

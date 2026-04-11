@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import com.sora.omniclaw.core.common.HostResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,7 +22,11 @@ class HostForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val command = HostServiceCommand.fromIntent(intent)
+        val desiredStateStore = applicationContext.hostServiceDesiredStateStore()
+        val command = HostServiceCommand.fromIntent(
+            intent = intent,
+            desiredRunning = desiredStateStore.desiredRunning,
+        )
         if (command == HostServiceCommand.Ignore) {
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -34,10 +39,13 @@ class HostForegroundService : Service() {
         }
 
         if (command == HostServiceCommand.Start) {
+            desiredStateStore.desiredRunning = true
             startForeground(NOTIFICATION_ID, buildNotification())
+        } else if (command == HostServiceCommand.Stop) {
+            desiredStateStore.desiredRunning = false
         }
 
-        val handler = HostServiceCommandHandler(dependencies)
+        val handler = HostServiceCommandHandler(dependencies, desiredStateStore)
         serviceScope.launch {
             when (handler.handle(command)) {
                 HostServiceContinuation.KeepRunning -> Unit
@@ -96,10 +104,16 @@ internal enum class HostServiceCommand {
     ;
 
     companion object {
-        fun fromIntent(intent: Intent?): HostServiceCommand = fromAction(intent?.action)
+        fun fromIntent(
+            intent: Intent?,
+            desiredRunning: Boolean,
+        ): HostServiceCommand = fromAction(intent?.action, desiredRunning)
 
-        fun fromAction(action: String?): HostServiceCommand = when (action) {
-            null -> Start
+        fun fromAction(
+            action: String?,
+            desiredRunning: Boolean,
+        ): HostServiceCommand = when (action) {
+            null -> if (desiredRunning) Start else Ignore
             HostForegroundService.ACTION_START -> Start
             HostForegroundService.ACTION_STOP -> Stop
             else -> Ignore
@@ -114,14 +128,26 @@ internal enum class HostServiceContinuation {
 
 internal class HostServiceCommandHandler(
     private val dependencies: HostServiceDependencies,
+    private val desiredStateStore: HostServiceDesiredStateStore,
 ) {
     suspend fun handle(command: HostServiceCommand): HostServiceContinuation = when (command) {
-        HostServiceCommand.Start -> when (dependencies.startHost()) {
-            is com.sora.omniclaw.core.common.HostResult.Success -> HostServiceContinuation.KeepRunning
-            is com.sora.omniclaw.core.common.HostResult.Failure -> HostServiceContinuation.StopSelf
+        HostServiceCommand.Start -> {
+            desiredStateStore.desiredRunning = true
+            when (val result = dependencies.startHost()) {
+                is HostResult.Success -> HostServiceContinuation.KeepRunning
+                is HostResult.Failure -> {
+                    if (result.error.recoverable) {
+                        HostServiceContinuation.StopSelf
+                    } else {
+                        desiredStateStore.desiredRunning = false
+                        HostServiceContinuation.StopSelf
+                    }
+                }
+            }
         }
 
         HostServiceCommand.Stop -> {
+            desiredStateStore.desiredRunning = false
             dependencies.stopHost()
             HostServiceContinuation.StopSelf
         }

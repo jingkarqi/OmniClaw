@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $scriptPath = Join-Path $repoRoot "scripts/verify-bootstrap-assets-in-apk.ps1"
+$runtimeArchiveFileName = "openclaw-2026.3.13.tgz"
 
 $requiredPayloads = @(
     @{
@@ -13,7 +14,7 @@ $requiredPayloads = @(
         content = "rootfs-payload"
     },
     @{
-        fileName = "openclaw-2026.3.13.tgz"
+        fileName = $runtimeArchiveFileName
         content = "runtime-payload"
     }
 )
@@ -141,6 +142,23 @@ function Assert-ExitCodeNonZero {
     }
 }
 
+function Assert-OutputContains {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Output,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedText,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Scenario
+    )
+
+    if ($Output -notlike "*$ExpectedText*") {
+        throw "$Scenario did not emit expected text: $ExpectedText"
+    }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("verify-bootstrap-assets-" + [System.Guid]::NewGuid().ToString("N"))
 [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
 
@@ -152,13 +170,21 @@ try {
 
     $invalidSizeApkPath = Join-Path $tempRoot "invalid-size.apk"
     New-TestApk -Path $invalidSizeApkPath -CorruptManifestSize
-    & pwsh -NoProfile -File $scriptPath -ApkPath $invalidSizeApkPath 2>$null
+    $invalidSizeOutput = (& pwsh -NoProfile -File $scriptPath -ApkPath $invalidSizeApkPath 2>&1 | Out-String)
     Assert-ExitCodeNonZero -ExitCode $LASTEXITCODE -Scenario "Manifest size mismatch verification"
+    Assert-OutputContains `
+        -Output $invalidSizeOutput `
+        -ExpectedText "Payload debian-rootfs.tar.xz size mismatch" `
+        -Scenario "Manifest size mismatch verification"
 
     $invalidHashApkPath = Join-Path $tempRoot "invalid-hash.apk"
     New-TestApk -Path $invalidHashApkPath -CorruptPayloadContent
-    & pwsh -NoProfile -File $scriptPath -ApkPath $invalidHashApkPath 2>$null
+    $invalidHashOutput = (& pwsh -NoProfile -File $scriptPath -ApkPath $invalidHashApkPath 2>&1 | Out-String)
     Assert-ExitCodeNonZero -ExitCode $LASTEXITCODE -Scenario "Payload hash mismatch verification"
+    Assert-OutputContains `
+        -Output $invalidHashOutput `
+        -ExpectedText "Payload $runtimeArchiveFileName sha256 mismatch" `
+        -Scenario "Payload hash mismatch verification"
 
     Write-Host "All APK bootstrap asset verification scenarios passed."
 }

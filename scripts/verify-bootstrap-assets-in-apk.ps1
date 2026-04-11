@@ -7,10 +7,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$requiredPayloadFileNames = @(
-    "debian-rootfs.tar.xz",
-    "openclaw-2026.3.13.tgz"
-)
+$rootFsFileName = "debian-rootfs.tar.xz"
+$runtimeArchiveFileNamePattern = "^openclaw-\d+\.\d+\.\d+\.tgz$"
 $manifestEntryPath = "assets/bootstrap/manifest.json"
 $supportedSchemaVersion = 1
 $sha256Pattern = "^[0-9a-f]{64}$"
@@ -209,16 +207,32 @@ try {
 
         $payloadIndex = Get-ManifestPayloadIndex -Manifest $manifest
 
-        $verifiedPayloads = foreach ($requiredPayloadFileName in $requiredPayloadFileNames) {
-            if (-not $payloadIndex.ContainsKey($requiredPayloadFileName)) {
-                throw "Bootstrap manifest is missing payload entry for $requiredPayloadFileName."
-            }
+        if (-not $payloadIndex.ContainsKey($rootFsFileName)) {
+            throw "Bootstrap manifest is missing payload entry for $rootFsFileName."
+        }
 
+        $runtimeArchiveFileNames = @(
+            $payloadIndex.Keys | Where-Object { $_ -match $runtimeArchiveFileNamePattern }
+        )
+        if ($runtimeArchiveFileNames.Count -eq 0) {
+            throw "Bootstrap manifest is missing a runtime archive entry matching openclaw-<version>.tgz."
+        }
+        if ($runtimeArchiveFileNames.Count -gt 1) {
+            throw "Bootstrap manifest must declare exactly one runtime archive entry matching openclaw-<version>.tgz."
+        }
+
+        $verifiedPayloads = @(
             Test-ManifestPayloadEntry `
                 -Archive $zipArchive `
-                -PayloadEntry $payloadIndex[$requiredPayloadFileName] `
-                -FileName $requiredPayloadFileName
-        }
+                -PayloadEntry $payloadIndex[$rootFsFileName] `
+                -FileName $rootFsFileName
+        )
+
+        $runtimeArchiveFileName = $runtimeArchiveFileNames[0]
+        $verifiedPayloads += Test-ManifestPayloadEntry `
+            -Archive $zipArchive `
+            -PayloadEntry $payloadIndex[$runtimeArchiveFileName] `
+            -FileName $runtimeArchiveFileName
     }
     finally {
         if ($null -ne $zipArchive) {

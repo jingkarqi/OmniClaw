@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -25,6 +26,7 @@ android {
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:model"))
+    implementation(project(":core:storage"))
     implementation(project(":runtime:api"))
     implementation(libs.apache.commons.compress)
     implementation(libs.kotlinx.coroutines.core)

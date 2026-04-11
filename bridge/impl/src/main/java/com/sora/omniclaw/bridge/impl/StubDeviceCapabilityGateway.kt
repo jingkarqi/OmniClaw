@@ -14,6 +14,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 class StubDeviceCapabilityGateway : DeviceCapabilityGateway {
+    private val supportedCapabilities = setOf(
+        "device.info",
+        "device.permissions",
+        "device.status",
+        "device.health",
+    )
+
     private val permissionSummary = MutableStateFlow(
         PermissionSummary(
             permissions = listOf(
@@ -27,13 +34,13 @@ class StubDeviceCapabilityGateway : DeviceCapabilityGateway {
                     id = "notifications",
                     label = "Notifications",
                     state = PermissionGrantState.Granted,
-                    required = true,
+                    required = false,
                 ),
                 PermissionStatus(
                     id = "accessibility",
                     label = "Accessibility",
-                    state = PermissionGrantState.Required,
-                    required = true,
+                    state = PermissionGrantState.Unavailable,
+                    required = false,
                 ),
             )
         )
@@ -42,6 +49,18 @@ class StubDeviceCapabilityGateway : DeviceCapabilityGateway {
     override fun observePermissionSummary(): Flow<PermissionSummary> = permissionSummary.asStateFlow()
 
     override suspend fun execute(command: BridgeCommand): BridgeResponse {
+        if (command.capability !in supportedCapabilities) {
+            return BridgeResponse(
+                requestId = command.requestId,
+                status = BridgeResponseStatus.Failure,
+                error = com.sora.omniclaw.bridge.api.BridgeResponseError(
+                    category = "unsupported",
+                    message = "Capability '${command.capability}' is not supported by StubDeviceCapabilityGateway.",
+                    recoverable = true,
+                ),
+            )
+        }
+
         return BridgeResponse(
             requestId = command.requestId,
             status = BridgeResponseStatus.Success,
